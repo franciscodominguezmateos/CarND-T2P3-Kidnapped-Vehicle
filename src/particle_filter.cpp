@@ -126,8 +126,8 @@ inline vector<LandmarkObs> observationsFromLocalToGlobalTransform(Particle &p,co
 long double workOutWeight(LandmarkObs &o,const Map::single_landmark_s &mu,double std_landmark[]){
  double &sx=std_landmark[0];
  double &sy=std_landmark[1];
- double sx2=sx;
- double sy2=sy;
+ double sx2=sx*sx;
+ double sy2=sy*sx;
  double dx=o.x-mu.x_f;
  double dy=o.y-mu.y_f;
  double dx2=dx*dx;
