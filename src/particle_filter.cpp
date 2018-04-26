@@ -59,8 +59,8 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
       new_theta=p.theta;
     }
     else{
-      new_x=p.x+velocity/yaw_rate*(sin(p.theta+yaw_rate*delta_t)-sin(p.theta));
-      new_y=p.y+velocity/yaw_rate*(cos(p.theta)-cos(yaw_rate*delta_t+p.theta));
+      new_x=p.x+velocity/yaw_rate*( sin(p.theta+yaw_rate*delta_t)-sin(p.theta));
+      new_y=p.y+velocity/yaw_rate*(-cos(p.theta+yaw_rate*delta_t)+cos(p.theta));
       new_theta=p.theta+yaw_rate*delta_t;
     }
     normal_distribution<double> Nx(new_x,std_pos[0]);
@@ -68,7 +68,10 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
     normal_distribution<double> Ntheta(new_theta,std_pos[0]);
     particles[i].x=Nx(gen);
     particles[i].y=Ny(gen);
-    particles[i].theta=Ntheta(gen); 
+    new_theta=Ntheta(gen);
+    //while(new_theta> M_PI) new_theta-=2.0*M_PI;
+    //while(new_theta<-M_PI) new_theta+=2.0*M_PI;
+    particles[i].theta=new_theta; 
   }
 }
 
@@ -90,12 +93,14 @@ void ParticleFilter::dataAssociation(const Map &map_landmarks, std::vector<Landm
     int    minIdx =-1; 
     for(unsigned int j=0;j<map_landmarks.landmark_list.size();j++){
       const Map::single_landmark_s &l=map_landmarks.landmark_list[j];
-      double d=distance(o,l);
-      if(d<minDist){
-         minDist=d;
-         minIdx=j;
+      double dist=distance(o,l);
+      if(dist<minDist){
+         minDist=dist;
+         minIdx=l.id_i;
       }
     }
+    //cout<<"minDist="<<minDist<<endl;
+    //cout<<"minIdx ="<<minIdx <<endl;
     o.id=minIdx;
   }
 }
@@ -118,11 +123,30 @@ inline vector<LandmarkObs> observationsFromLocalToGlobalTransform(Particle &p,co
   return tObservations;
 }
 
-double workOutWeight(LandmarkObs &o,const Map::single_landmark_s &mu,double std_landmark[]){
- double p=1.0/(2.0*M_PI*std_landmark[0]*std_landmark[1])*exp(-(pow(o.x-mu.x_f,2)/(2*pow(std_landmark[0],2))+
-                                                               pow(o.y-mu.y_f,2)/(2*pow(std_landmark[1],2))));
+long double workOutWeight(LandmarkObs &o,const Map::single_landmark_s &mu,double std_landmark[]){
+ double &sx=std_landmark[0];
+ double &sy=std_landmark[1];
+ double sx2=sx;
+ double sy2=sy;
+ double dx=o.x-mu.x_f;
+ double dy=o.y-mu.y_f;
+ double dx2=dx*dx;
+ double dy2=dy*dy;
+ double e=dx2/(2.0*sx2)+dy2/(2.0*sy2);
+ long double p=1.0/(2.0*M_PI*sx*sy)*exp(-e);
+ //if(p==0)
+  //cout<<"p="<<p<<"dx2="<<dx2<<"dy2="<<dy2<<"sx2"<<sx2<<"sy2"<<sy2<<"e="<<e<<endl;
  return p;
 }
+Map::single_landmark_s findLandmark(const Map &map_landmarks,int id){
+  for(unsigned int i=0;i<map_landmarks.landmark_list.size();i++){
+    const Map::single_landmark_s &l=map_landmarks.landmark_list[i];
+    if(l.id_i==id)
+      return l;
+  }
+  cout<<"landmark Id not found!!!"<<endl;
+}
+    
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
 		const std::vector<LandmarkObs> &observations, const Map &map_landmarks) {
 	// TODO: Update the weights of each particle using a mult-variate Gaussian distribution. You can read
@@ -143,15 +167,26 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
   //  3.- Compute weights for particle
   for(int i=0;i<num_particles;i++){
     Particle &p=particles[i];
-    vector<LandmarkObs> tObservations;
-    tObservations=observationsFromLocalToGlobalTransform(p,observations);
-    dataAssociation(map_landmarks,tObservations);
-    p.weight=1.0;
-    for(unsigned int j=0;j<tObservations.size();j++){
-      int idxAssoc=tObservations[j].id;
-      double prob=workOutWeight(tObservations[j],map_landmarks.landmark_list[idxAssoc],std_landmark);
-      if(prob>0)
+    //global Observations
+    vector<LandmarkObs> gObservations;
+    gObservations=observationsFromLocalToGlobalTransform(p,observations);
+    dataAssociation(map_landmarks,gObservations);
+    p.weight=1;
+    p.associations.clear();
+    p.sense_x.clear();
+    p.sense_y.clear();
+    for(unsigned int j=0;j<gObservations.size();j++){
+      LandmarkObs &go=gObservations[j];
+      Map::single_landmark_s l=findLandmark(map_landmarks,go.id);
+      long double prob=workOutWeight(go,l,std_landmark);
+      if(prob>0.0)
        p.weight*=prob;
+      else{
+       p.weight*=0.00000001;
+      }
+      p.associations.push_back(go.id);
+      p.sense_x.push_back(go.x);
+      p.sense_y.push_back(go.y);
     }
     weights[i]=p.weight;
   }
